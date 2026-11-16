@@ -88,6 +88,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --save: delete output.root (images, manifest, _failed, _tmp) and coverage.json first",
     )
+    parser.add_argument(
+        "--propose-criteria",
+        action="store_true",
+        help="write a proposals file from the review queue. Output only; criteria.yml is not changed.",
+    )
+    parser.add_argument(
+        "--renormalize",
+        metavar="MANIFEST",
+        default=None,
+        help="re-resolve brand columns in MANIFEST from brand_raw using the current criteria",
+    )
+    parser.add_argument(
+        "--rename-files",
+        action="store_true",
+        help="with --renormalize: also rename files on disk to the new brand slug (destructive)",
+    )
     return parser
 
 
@@ -266,6 +282,35 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
     return 0
 
 
+def _propose(criteria: Criteria) -> int:
+    from maintenance import PROPOSAL_FILENAME, REPO_ROOT, propose_criteria
+
+    queue = pipeline_repo_path(criteria.fields.brand.review_queue)
+    clusters, raw_values = propose_criteria(criteria, queue, REPO_ROOT / PROPOSAL_FILENAME)
+    if raw_values == 0:
+        print("no unknowns to propose")
+        return 0
+    print(f"{clusters} cluster(s) proposed from {raw_values} raw value(s)")
+    print(f"written: {REPO_ROOT / PROPOSAL_FILENAME}")
+    return 0
+
+
+def _renormalize(criteria: Criteria, manifest_arg: str, rename_files: bool) -> int:
+    from maintenance import renormalize_manifest
+
+    manifest = pipeline_repo_path(manifest_arg)
+    changed, renamed, errors = renormalize_manifest(criteria, manifest, rename_files=rename_files)
+    print(f"{changed} row(s) changed, {renamed} file(s) renamed, {errors} rename error(s)")
+    print(f"log: {manifest.name}.renormalize.log next to {manifest}")
+    return 0
+
+
+def pipeline_repo_path(value: str | Path) -> Path:
+    import pipeline
+
+    return pipeline.repo_path(value)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -276,6 +321,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.validate_only:
         return 0
+
+    if args.rename_files and not args.renormalize:
+        print("--rename-files only applies together with --renormalize", file=sys.stderr)
+        return 2
+
+    if args.propose_criteria:
+        return _propose(criteria)
+
+    if args.renormalize:
+        return _renormalize(criteria, args.renormalize, args.rename_files)
 
     if args.download_one:
         return _download_one(args.download_one, criteria)

@@ -124,6 +124,46 @@ class ReviewCollector:
         self._pending.clear()
 
 
+ACTION_NONE = None
+ACTION_PLACEHOLDER = "placeholder"
+ACTION_OUT_OF_VOCABULARY = "not_in_vocabulary"
+ACTION_QUEUE = "queue"
+
+
+def resolve_brand(raw: str | None, criteria: Criteria) -> tuple[str, str, str | None]:
+    """Pure brand resolution. Returns (brand, source, action). No logging, no file writes.
+
+    source is canonical | alias | raw | missing. action says what the caller should
+    record: ACTION_PLACEHOLDER or ACTION_OUT_OF_VOCABULARY (log), ACTION_QUEUE (review
+    queue), or None.
+    """
+    missing = criteria.naming.missing_token
+    text = (raw or "").strip()
+    if not text:
+        return (missing, "missing", ACTION_NONE)
+
+    lowered = text.lower()
+    slug = pipeline.slugify(lowered)
+    if not slug:
+        return (missing, "missing", ACTION_NONE)
+
+    brand = criteria.fields.brand
+    if slug in brand.canonical:
+        return (slug, "canonical", ACTION_NONE)
+
+    if lowered in {placeholder.lower() for placeholder in brand.placeholders}:
+        return (missing, "missing", ACTION_PLACEHOLDER)
+
+    for canonical, aliases in brand.aliases.items():
+        if lowered in {alias.lower() for alias in aliases}:
+            return (canonical, "alias", ACTION_NONE)
+
+    if brand.open_vocabulary:
+        return (slug, "raw", ACTION_QUEUE)
+
+    return (missing, "missing", ACTION_OUT_OF_VOCABULARY)
+
+
 def normalize_brand(
     raw: str | None,
     criteria: Criteria,
@@ -137,39 +177,20 @@ def normalize_brand(
     queue. They are never promoted to canonical here. Pass a ReviewCollector to
     batch writes; without one, the queue is written immediately.
     """
-    missing = criteria.naming.missing_token
+    brand, source, action = resolve_brand(raw, criteria)
     text = (raw or "").strip()
-    if not text:
-        return (missing, "missing")
-
-    lowered = text.lower()
-    slug = pipeline.slugify(lowered)
-    if not slug:
-        return (missing, "missing")
-
-    brand = criteria.fields.brand
-    if slug in brand.canonical:
-        return (slug, "canonical")
-
-    if lowered in {placeholder.lower() for placeholder in brand.placeholders}:
+    if action == ACTION_PLACEHOLDER:
         pipeline.append_log(criteria.output.unclassified_log, f"brand placeholder | {text}")
-        return (missing, "missing")
-
-    for canonical, aliases in brand.aliases.items():
-        if lowered in {alias.lower() for alias in aliases}:
-            return (canonical, "alias")
-
-    if brand.open_vocabulary:
+    elif action == ACTION_OUT_OF_VOCABULARY:
+        pipeline.append_log(criteria.output.unclassified_log, f"brand not in vocabulary | {text}")
+    elif action == ACTION_QUEUE:
         if review is not None:
             review.add(text, example_url)
         else:
             single = ReviewCollector()
             single.add(text, example_url)
             single.flush(criteria)
-        return (slug, "raw")
-
-    pipeline.append_log(criteria.output.unclassified_log, f"brand not in vocabulary | {text}")
-    return (missing, "missing")
+    return (brand, source)
 
 
 def normalize_condition(raw: str | None, criteria: Criteria) -> str:

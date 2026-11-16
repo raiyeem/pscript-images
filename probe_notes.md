@@ -220,6 +220,8 @@ Condition field is absent on the sampled product page; accepted as unknown for t
 
 Some pages (Odyssey, Golfkläder) put `Other` in `Subcategory`, so the brand is only in the title. `normalize_brand` does not read titles. Consider a brand-from-title fallback as a future enhancement.
 
+Technical debt: manifest lacks condition_raw — condition aliases cannot be renormalized retroactively. If a manifest migration is ever worth doing, add condition_raw and re-scrape; otherwise this is a known limitation of older manifests.
+
 ## Open items
 
 - Probe a product detail page (a URL you give me) to check for `Product` JSON-LD with `brand.name` and `itemCondition`, and to see its image markup.
