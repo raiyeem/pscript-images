@@ -343,6 +343,16 @@ Product URL check: the `id` equals the UUID in the product URL. The first three 
 
 This endpoint is outside the current `--crawl` design, which reads only the static CollectionPage. Using it would mean calling an undocumented API. That needs a decision before any code changes.
 
+## Category ID mapping
+
+Categories reachable via `core.foremarket.se/products/filter` with `categoryIds`: driver (1), fairway-wood (2), hybrid (3), putter (4), wedge (5), men-apparel (7), trolleys (10), bags (11), iron (13).
+
+Not reachable: shoes, balls (no `categoryIds` in the request); womens-apparel, junior-apparel (only men-apparel returns a filter; the bare apparel slug sends no filter).
+
+Shoes and balls fall back to JSON-LD (12 products each). Apparel coverage is men's only via API; womens/junior require alternative slugs to be probed in a future milestone.
+
+Spec aliases added so the `Category` spec resolves: Golfbags → Golf Bag, Trolleys → Trolley, Hybrid / Utility Iron → Hybrid.
+
 ## Open items
 
 - Probe a product detail page (a URL you give me) to check for `Product` JSON-LD with `brand.name` and `itemCondition`, and to see its image markup.

@@ -69,7 +69,7 @@ categories:
     keywords: [fairway]
     required_angles: [face, crown, sole, shaft-grip]
   - name: Hybrid
-    aliases: [hybrids, rescue, utility]
+    aliases: [hybrids, rescue, utility, hybrid / utility iron, utility iron]
     keywords: [hybrid, rescue]
     required_angles: [face, crown, sole, shaft-grip]
   - name: Irons
@@ -85,11 +85,11 @@ categories:
     keywords: [putter]
     required_angles: [face, sole, top-line, grip]
   - name: Golf Bag
-    aliases: [bag, cart bag, stand bag, carry bag]
+    aliases: [bag, cart bag, stand bag, carry bag, golfbags]
     keywords: [bag]
     required_angles: [front, side, top, pocket]
   - name: Trolley
-    aliases: [push cart, pull cart, golf trolley]
+    aliases: [push cart, pull cart, golf trolley, trolleys]
     keywords: [trolley, push cart, pull cart]
     required_angles: [folded, unfolded, wheels, handle]
   - name: Shoes
@@ -170,10 +170,16 @@ crawl:
     url: "https://core.foremarket.se/products/filter"
     page_size: 12
     max_products_per_category: 50
-  # Verified by reading categoryIds from the filter request each category page sends on load.
-  # driver: 1 (checked: product names are drivers); putter: 4 (checked); iron: 13 (checked).
-  # Categories not listed here use the JSON-LD fallback.
+  # Verified by reading categoryIds from the filter request each category page sends on load,
+  # then checking sample product names. Not listed (no categoryIds sent, JSON-LD fallback):
+  # shoes, balls. Apparel: men-apparel only; womens/junior not reachable via API.
   category_ids:
     driver: 1
+    fairway-wood: 2
+    hybrid: 3
     putter: 4
+    wedge: 5
+    men-apparel: 7
+    trolleys: 10
+    bags: 11
     iron: 13
