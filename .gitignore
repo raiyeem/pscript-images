@@ -1,0 +1,15 @@
+# Python environment and caches
+venv/
+__pycache__/
+.pytest_cache/
+
+# Scraper output (images, manifest, logs, coverage)
+images/
+*.part
+scrape_log.txt
+unclassified.log
+coverage.json
+
+# Tooling
+node_modules/
+.playwright-mcp/

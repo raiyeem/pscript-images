@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/Vivasoft/Desktop/ForeMarket/pscript_images/node_modules/@playwright/mcp/cli.js"
+      ]
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/Vivasoft/Desktop/ForeMarket/pscript_images/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js",
+        "C:/Users/Vivasoft/Desktop/ForeMarket/pscript_images"
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "devDependencies": {
+    "@modelcontextprotocol/server-filesystem": "2.3.0",
+    "@playwright/mcp": "0.0.85"
+  }
+}

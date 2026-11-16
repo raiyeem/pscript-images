@@ -1,0 +1,140 @@
+version: 1
+
+output:
+  root: images
+  manifest: images/manifest.csv
+  scrape_log: scrape_log.txt
+  unclassified_log: unclassified.log
+  coverage_report: coverage.json
+  review_dir: review
+
+naming:
+  folder_template: "{category}"
+  file_template: "{brand}_{condition}_{angle}_{index:03d}.{ext}"
+  missing_token: unknown
+  index_padding: 3
+
+fields:
+  brand:
+    open_vocabulary: true
+    review_queue: review/brands_unknown.csv
+    canonical:
+      - taylormade
+      - callaway
+      - titleist
+      - ping
+      - cobra
+      - cleveland
+      - mizuno
+      - srixon
+      - wilson
+      - pxg
+      - honma
+      - xxio
+    aliases:
+      taylormade: ["taylor made", "taylormade golf", "tm"]
+      callaway: ["callaway golf"]
+      titleist: ["titleist golf"]
+      ping: ["ping golf"]
+      wilson: ["wilsson"]
+  condition:
+    open_vocabulary: false
+    default: unknown
+    enum: [new, like-new, very-good, good, fair, poor, unknown]
+    aliases:
+      new: ["brand new", "bnib", "sealed"]
+      like-new: ["excellent", "mint", "refurbished", "open box"]
+      very-good: ["very good", "great condition"]
+      good: ["used - good", "pre-owned good", "good condition"]
+      fair: ["used - fair", "fair condition"]
+      poor: ["used - poor", "for parts"]
+
+categories:
+  - name: Driver
+    aliases: [drivers, 1-wood]
+    keywords: [driver]
+    required_angles: [face, crown, sole, shaft-grip]
+  - name: Fairway Wood
+    aliases: [fairway, 3-wood, 5-wood, fairway wood]
+    keywords: [fairway]
+    required_angles: [face, crown, sole, shaft-grip]
+  - name: Hybrid
+    aliases: [hybrids, rescue, utility]
+    keywords: [hybrid, rescue]
+    required_angles: [face, crown, sole, shaft-grip]
+  - name: Irons
+    aliases: [iron, iron set, irons set]
+    keywords: [iron]
+    required_angles: [face, sole, shaft-grip]
+  - name: Wedges
+    aliases: [wedge, gw, sw, lw, pitching wedge, sand wedge, lob wedge]
+    keywords: [wedge]
+    required_angles: [face, sole, shaft-grip]
+  - name: Putter
+    aliases: [putters, mallet, blade putter]
+    keywords: [putter]
+    required_angles: [face, sole, top-line, grip]
+  - name: Golf Bag
+    aliases: [bag, cart bag, stand bag, carry bag]
+    keywords: [bag]
+    required_angles: [front, side, top, pocket]
+  - name: Trolley
+    aliases: [push cart, pull cart, golf trolley]
+    keywords: [trolley, push cart, pull cart]
+    required_angles: [folded, unfolded, wheels, handle]
+  - name: Shoes
+    aliases: [shoe, golf shoes, spiked shoes]
+    keywords: [shoe, shoes]
+    required_angles: [side, sole, heel, top]
+  - name: Apparel
+    aliases: [shirt, polo, trousers, jacket, midlayer]
+    keywords: [polo, shirt, trouser, jacket, midlayer]
+    required_angles: [front, back, detail]
+  - name: Balls
+    aliases: [ball, golf balls, dozen]
+    keywords: [ball, balls, dozen]
+    required_angles: [front, side, packaging]
+
+angles:
+  aliases:
+    face: ["club face", "face view", "face"]
+    crown: ["crown view", "crown", "top down"]
+    sole: ["sole view", "sole", "bottom"]
+    shaft-grip: ["shaft and grip", "shaft & grip", "grip", "shaft"]
+    top-line: ["top line", "topline", "top view"]
+    grip: ["grip"]
+    front: ["front", "front view"]
+    back: ["back", "back view"]
+    side: ["side", "side view"]
+    top: ["top", "top view"]
+    heel: ["heel"]
+    detail: ["detail", "close up", "closeup"]
+    folded: ["folded"]
+    unfolded: ["unfolded", "open"]
+    wheels: ["wheel", "wheels"]
+    handle: ["handle"]
+    pocket: ["pocket", "pockets"]
+    packaging: ["packaging", "box"]
+
+extraction:
+  prefer_jsonld: true
+  jsonld_types: [Product, ProductGroup]
+  brand_keys: [brand.name, brand]
+  condition_keys: [itemCondition]
+  condition_map:
+    NewCondition: new
+    UsedCondition: good
+    RefurbishedCondition: like-new
+    DamagedCondition: poor
+  specs_labels:
+    brand: ["Subcategory"]
+    condition: []      # add labels here if a condition field is ever found
+
+politeness:
+  delay_seconds: 1.5
+  max_images_per_page: 50
+  respect_robots: true
+
+scope:
+  page_type: product
+  one_item_per_page: true
