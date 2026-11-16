@@ -163,3 +163,14 @@ crawl:
   delay_seconds: 1.5
   same_host_only: true
   log_path: crawl.log
+  api:
+    url: "https://core.foremarket.se/products/filter"
+    page_size: 12
+    max_products_per_category: 50
+  # Verified by reading categoryIds from the filter request each category page sends on load.
+  # driver: 1 (checked: product names are drivers); putter: 4 (checked); iron: 13 (checked).
+  # Categories not listed here use the JSON-LD fallback.
+  category_ids:
+    driver: 1
+    putter: 4
+    iron: 13

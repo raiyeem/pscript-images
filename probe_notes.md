@@ -301,6 +301,46 @@ First `<div role="link">` on the page (truncated to 500 characters):
 
 **Conclusion: static JSON-LD (`CollectionPage` `ItemList` in the initial HTML) is viable for discovering product URLs from a category page, without clicking cards or calling any API.**
 
+## Pagination investigation — driver
+
+Read-only, on `https://foremarket.se/en/explore?category=driver`. One click on "Load more". No purchase, login, or account action. No code or criteria changed.
+
+### 1. Observed Load more click
+
+- Before click: 12 `div[role=link]` cards, 12 `<img>` inside them.
+- Requests to `core.foremarket.se` during the click: **1**.
+- After the click and network idle: 24 cards, 24 images. So one click adds one page of 12.
+
+### 2. Pagination shape
+
+Request (captured from the browser):
+
+- Method: **POST** `https://core.foremarket.se/products/filter`
+- Headers: `Content-Type: application/json`, `Referer: https://foremarket.se/`
+- Body: `{"offset":24,"limit":12,"categoryIds":[1]}`. The offset was 24 because 24 cards were already on the page after the click.
+- Response: 200, `application/json; charset=utf-8`, 4,629 bytes.
+- Response body (first 300 characters): `{"totalCount":255,"data":[{"id":"dcd3ad16-50fc-4b4f-b2ba-6b425e190fba","name":"Callaway Rogue ST Max 24 driver","slug":"callaway-rogue-st-max-24-driver","estimatedValue":2159,"orientation":"RIGHT_HANDED","attributes":{},"imageOne":"https://assets.foremarket.se/products/11fa648d-c787-42c7-82e7-9d6365`
+
+Body keys: `offset`, `limit`, `categoryIds`. Each response item has `id`, `name`, `slug`, `estimatedValue`, `orientation`, `attributes`, and `imageOne`. The response has `totalCount` at the top level.
+
+Product URL check: the `id` equals the UUID in the product URL. The first three ids at offset 0 are `d8ae05aa-…`, `a8a93777-…`, `bb58c5b6-…`, which match the first three URLs from the category JSON-LD. So `/en/product/<id>` is the URL form, and the `slug` is not used in the URL.
+
+### 3. Direct API test (Python `requests`, outside the browser)
+
+- `{"offset":0,"limit":12,"categoryIds":[1]}` → 200, `application/json`, 4,755 bytes. `totalCount` 255. Returns 12 items with the same ids as the category JSON-LD.
+- `{"offset":12,"limit":12,"categoryIds":[1]}` → 200, 4,726 bytes. 12 different items (for example `c30803b8-…`). **Incrementing the offset returns different products.**
+- `{"offset":24,"limit":12,"categoryIds":[1]}` → 200, 4,630 bytes. 12 different items again.
+- Header test: `Content-Type: application/json` alone → 200, same result. No headers at all → **400**. So the `Content-Type` header is required. No cookies, session, or browser state are needed.
+- `limit` test: 24 → 200 (24 items). **50 → 400**, **100 → 400**. The maximum accepted `limit` is between 24 and 49.
+- Extra fields are rejected. `{"offset":24,"limit":12,"categoryIds":[1],"page":3}` → 400 (`additionalProperties` schema error). `page` is not a valid parameter; only `offset` works for paging.
+- Without `categoryIds`, the same call returns `totalCount` 2256 (all products). `categoryIds: [1]` scopes it to the driver category.
+
+### 4. Answer
+
+**(a) Pagination works via a replicable API call from Python.** The call is a plain POST with a JSON body and a `Content-Type` header. It needs no cookies or browser session. The `offset` field pages through the category. The category has 255 products at 12 per page, so about 22 requests cover it. The per-request limit is capped below 50; 24 is accepted.
+
+This endpoint is outside the current `--crawl` design, which reads only the static CollectionPage. Using it would mean calling an undocumented API. That needs a decision before any code changes.
+
 ## Open items
 
 - Probe a product detail page (a URL you give me) to check for `Product` JSON-LD with `brand.name` and `itemCondition`, and to see its image markup.

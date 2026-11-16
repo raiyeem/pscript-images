@@ -136,11 +136,19 @@ class Scope(_Strict):
     one_item_per_page: bool
 
 
+class ApiCrawl(_Strict):
+    url: str = Field(min_length=1)
+    page_size: int = Field(ge=1)
+    max_products_per_category: int = Field(ge=1)
+
+
 class Crawl(_Strict):
     max_urls_per_category: int = Field(ge=1)
     delay_seconds: float = Field(ge=0)
     same_host_only: bool
     log_path: str
+    api: ApiCrawl
+    category_ids: dict[str, int]
 
 
 class Criteria(_Strict):
