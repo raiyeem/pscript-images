@@ -38,6 +38,8 @@ class Output(_Strict):
     review_dir: str
     filtered_log: str
     conversion_errors_log: str
+    failed_dir: str
+    tmp_dir: str
     image_format: Literal["jpeg", "png", "original"]
     jpeg_quality: int = Field(ge=1, le=100)
 

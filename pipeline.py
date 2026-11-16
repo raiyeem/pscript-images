@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -136,13 +137,38 @@ def build_filename(
     return criteria.naming.file_template.format_map(fields)
 
 
+_SLUG_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(value: str) -> str:
+    """Lowercase ASCII slug: runs of non-alphanumerics become '-', ends trimmed."""
+    return _SLUG_SPLIT.sub("-", value.strip().lower()).strip("-")
+
+
+def category_from_specs(criteria: Criteria, specs: dict[str, str]) -> str | None:
+    """Match specs["Category"] case-insensitively against category names and aliases. First match wins."""
+    value = specs.get("Category", "").strip().lower()
+    if not value:
+        return None
+    for category in criteria.categories:
+        candidates = [category.name, *category.aliases]
+        if any(candidate.lower() == value for candidate in candidates):
+            return category.name
+    return None
+
+
 def keyword_category(criteria: Criteria, url: str, alt: str | None) -> str | None:
-    """Stub classifier: first category whose keyword appears in the URL or alt text."""
+    """Fallback: first category whose keyword appears in the URL or alt text."""
     text = f"{url} {alt or ''}".lower()
     for category in criteria.categories:
         if any(keyword.lower() in text for keyword in category.keywords):
             return category.name
     return None
+
+
+def classify(criteria: Criteria, url: str, alt: str | None, specs: dict[str, str]) -> str | None:
+    """Spec Category first; keyword fallback only when the spec is absent or unrecognised."""
+    return category_from_specs(criteria, specs) or keyword_category(criteria, url, alt)
 
 
 def existing_counts(criteria: Criteria) -> dict[str, int]:
@@ -159,10 +185,15 @@ def existing_counts(criteria: Criteria) -> dict[str, int]:
 
 
 def append_manifest(criteria: Criteria, row: dict[str, Any]) -> None:
-    """Append one row. Writes the header first if the manifest is new or empty."""
+    """Append one row. Writes the header first if the manifest is new or empty.
+
+    Only saved, converted files get rows. Failed files go to output.failed_dir instead.
+    """
     missing = [key for key in REQUIRED_MANIFEST_FIELDS if not row.get(key)]
     if missing:
         raise ValueError(f"manifest row missing required field(s): {', '.join(missing)}")
+    if row["status"] != "ok":
+        raise ValueError(f"manifest rows are only written for status 'ok', got {row['status']!r}")
 
     manifest = repo_path(criteria.output.manifest)
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -185,3 +216,13 @@ def append_log(path: str | Path, line: str) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as handle:
         handle.write(line.rstrip("\n") + "\n")
+
+
+def move_to_failed(criteria: Criteria, path: str | Path) -> Path:
+    """Move a file whose conversion failed into output.failed_dir. Returns the new path."""
+    source = Path(path)
+    target_dir = repo_path(criteria.output.failed_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / source.name
+    os.replace(source, target)
+    return target

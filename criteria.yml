@@ -9,6 +9,8 @@ output:
   review_dir: review
   filtered_log: filtered.log
   conversion_errors_log: conversion_errors.log
+  failed_dir: images/_failed
+  tmp_dir: images/_tmp
   image_format: jpeg     # one of: jpeg, png, original
   jpeg_quality: 90       # 1-100, ignored if format is png or original
 

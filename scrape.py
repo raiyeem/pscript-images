@@ -152,7 +152,7 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
     pipeline.ensure_folders(criteria)
     version = pipeline.criteria_version(criteria_file)
     counts = pipeline.existing_counts(criteria)
-    tmp_root = pipeline.repo_path(criteria.output.root) / "_tmp"
+    tmp_root = pipeline.repo_path(criteria.output.tmp_dir)
     filtered: list[Filtered] = []
     downloaded = failed = conversion_errors = 0
 
@@ -166,13 +166,18 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                 candidates = candidates[:limit]
 
             for candidate in candidates:
-                category = pipeline.keyword_category(criteria, candidate.url, candidate.alt)
+                category = pipeline.classify(criteria, candidate.url, candidate.alt, candidate.specs)
                 folder_key = category or missing
                 if category is None:
                     pipeline.append_log(
                         criteria.output.unclassified_log,
-                        f"no category keyword | {candidate.url} | {candidate.alt or '-'}",
+                        f"no category match | {candidate.url} | {candidate.alt or '-'}",
                     )
+
+                brand_raw = candidate.specs.get("Subcategory", "").strip()
+                brand_slug = pipeline.slugify(brand_raw) if brand_raw else ""
+                brand = brand_slug or missing
+                brand_source = "raw" if brand_slug else "missing"
 
                 result = download_image(
                     candidate.url, tmp_root / uuid.uuid4().hex, page=page, criteria=criteria
@@ -182,14 +187,13 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                     folder = pipeline.category_folder(criteria, category)
                     folder.mkdir(parents=True, exist_ok=True)
                     ext = Path(result.path).suffix.lstrip(".")
-                    brand_raw = candidate.specs.get("Subcategory", "")
 
                     index = counts.get(folder_key, 0) + 1
                     while True:
                         name = pipeline.build_filename(
                             criteria,
                             category=folder_key,
-                            brand=missing,
+                            brand=brand,
                             condition=missing,
                             angle=missing,
                             index=index,
@@ -207,9 +211,9 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                         {
                             "file": pipeline.relative_posix(final),
                             "category": folder_key,
-                            "brand": missing,
+                            "brand": brand,
                             "brand_raw": brand_raw,
-                            "brand_source": "raw" if brand_raw else "missing",
+                            "brand_source": brand_source,
                             "condition": missing,
                             "angle": missing,
                             "source_url": candidate.url,
@@ -222,10 +226,11 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                     )
                     downloaded += 1
                 elif result.path:
-                    # The file exists on disk but conversion failed: record it, skip the manifest.
+                    # The file exists but conversion failed: move it out of the category tree and log it.
+                    failed_path = pipeline.move_to_failed(criteria, result.path)
                     pipeline.append_log(
                         criteria.output.conversion_errors_log,
-                        f"{candidate.url} | {result.path} | {result.error_message}",
+                        f"{candidate.url} | {failed_path} | {result.error_message}",
                     )
                     conversion_errors += 1
                 else:

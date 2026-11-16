@@ -27,7 +27,9 @@ live in that file only. Code reads them; code never embeds them.
   log the miss to `unclassified.log`.
 - Every saved image appends exactly one row to `manifest.csv`:
   file,category,brand,brand_raw,brand_source,condition,angle,source_url,
-  scraped_at,sha256,criteria_version
+  scraped_at,sha256,criteria_version,status,error
+  Files whose conversion fails are moved to `images/_failed/` and logged to
+  `conversion_errors.log`; they get no manifest row.
 - After a run, write `coverage.json`: per category, required_angles
   captured vs missing.
 - `criteria_version` = first 12 chars of the SHA-256 of criteria.yml (a content hash, not a git commit). Bash: `sha256sum criteria.yml | cut -c1-12`. PowerShell: `(Get-FileHash criteria.yml -Algorithm SHA256).Hash.Substring(0,12).ToLower()`.
