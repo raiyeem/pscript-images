@@ -61,6 +61,7 @@ class Naming(_Strict):
 class BrandField(_Strict):
     open_vocabulary: bool
     review_queue: str
+    placeholders: list[str]
     canonical: list[str]
     aliases: dict[str, list[str]]
 
@@ -107,6 +108,7 @@ class Extraction(_Strict):
     scroll_wait_ms: int = Field(ge=0)
     wait_for_selector: str = Field(min_length=1)
     wait_timeout_ms: int = Field(ge=1)
+    excluded_url_patterns: list[str]
 
     @field_validator("excluded_extensions")
     @classmethod

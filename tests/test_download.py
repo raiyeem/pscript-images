@@ -153,6 +153,23 @@ def test_extension_from_content_type(tmp_path, monkeypatch):
 # --- conversion ------------------------------------------------------------
 
 
+def test_jpeg_url_extension_is_normalized_to_jpg(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        download.requests,
+        "get",
+        lambda *a, **k: FakeResponse(200, {"Content-Type": "image/jpeg"}, chunks=[JPEG_BYTES]),
+    )
+
+    result = download.download_image(
+        "https://assets.foremarket.se/products/example.jpeg", tmp_path / "pic", criteria=_criteria()
+    )
+
+    assert result.status == "ok"
+    assert result.path == str(tmp_path / "pic.jpg")
+    assert (tmp_path / "pic.jpg").exists()
+    assert not (tmp_path / "pic.jpeg").exists()
+
+
 def test_convert_webp_to_jpeg(tmp_path):
     source = tmp_path / "source.webp"
     source.write_bytes(_webp_bytes())

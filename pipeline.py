@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -200,3 +202,60 @@ def move_to_failed(criteria: Criteria, path: str | Path) -> Path:
     target = target_dir / source.name
     os.replace(source, target)
     return target
+
+
+def reset_outputs(criteria: Criteria) -> None:
+    """Delete output.root (images, manifest, failed, tmp) and output.coverage_report.
+
+    Refuses any output.root outside the repo, so a bad config cannot delete other files.
+    """
+    root = repo_path(criteria.output.root).resolve()
+    if root == REPO_ROOT or REPO_ROOT not in root.parents:
+        raise ValueError(f"refusing to reset an output root outside the repo: {root}")
+    if root.exists():
+        shutil.rmtree(root)
+    for target in (repo_path(criteria.output.manifest), repo_path(criteria.output.coverage_report)):
+        if target.exists():
+            target.unlink()
+
+
+def write_coverage(criteria: Criteria, rows: list[dict[str, str]], source_url: str, version: str) -> Path:
+    """Write output.coverage_report from this run's manifest rows.
+
+    Captured angles come from the rows' angle column. Angles that are missing or
+    unknown count as not captured. Categories with no required angles get null
+    coverage, not 0.
+    """
+    missing_token = criteria.naming.missing_token
+    per_category: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        entry = per_category.setdefault(row["category"], {"downloaded": 0, "angles": set()})
+        entry["downloaded"] += 1
+        if row["angle"] != missing_token:
+            entry["angles"].add(row["angle"])
+
+    configured = {category.name: category for category in criteria.categories}
+    categories: dict[str, dict[str, Any]] = {}
+    for name in sorted(per_category):
+        entry = per_category[name]
+        required = list(configured[name].required_angles) if name in configured else []
+        captured = [angle for angle in required if angle in entry["angles"]]
+        missing = [angle for angle in required if angle not in captured]
+        categories[name] = {
+            "downloaded": entry["downloaded"],
+            "required_angles": required,
+            "captured_angles": captured,
+            "missing_angles": missing,
+            "coverage_pct": round(100 * len(captured) / len(required)) if required else None,
+        }
+
+    report = {
+        "criteria_version": version,
+        "run_at": utc_now_iso(),
+        "source_url": source_url,
+        "categories": categories,
+    }
+    path = repo_path(criteria.output.coverage_report)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return path

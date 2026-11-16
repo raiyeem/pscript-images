@@ -24,6 +24,7 @@ fields:
   brand:
     open_vocabulary: true
     review_queue: review/brands_unknown.csv
+    placeholders: [other, n/a, na, unknown, none, "-"]
     canonical:
       - taylormade
       - callaway
@@ -93,7 +94,7 @@ categories:
     keywords: [shoe, shoes]
     required_angles: [side, sole, heel, top]
   - name: Apparel
-    aliases: [shirt, polo, trousers, jacket, midlayer]
+    aliases: [shirt, polo, trousers, jacket, midlayer, men apparel, womens apparel, junior apparel, apparel]
     keywords: [polo, shirt, trouser, jacket, midlayer]
     required_angles: [front, back, detail]
   - name: Balls
@@ -142,6 +143,7 @@ extraction:
   scroll_wait_ms: 1500
   wait_for_selector: "dt"     # element that proves SSR content is rendered
   wait_timeout_ms: 15000
+  excluded_url_patterns: [user-profile, /profile/, avatar, seller]
 
 politeness:
   delay_seconds: 1.5

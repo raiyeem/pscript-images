@@ -111,6 +111,15 @@ def _scroll_to_load(page: Any, steps: int, wait_ms: int) -> None:
         page.wait_for_timeout(wait_ms)
 
 
+def excluded_url_pattern(url: str, patterns: list[str]) -> str | None:
+    """First configured pattern found in the URL (case-insensitive), or None."""
+    lowered = url.lower()
+    for pattern in patterns:
+        if pattern.lower() in lowered:
+            return pattern
+    return None
+
+
 def _extension(url: str) -> str:
     """File extension of the real image, unwrapping Next.js /_next/image?url=... links."""
     parts = urlsplit(url)
@@ -179,6 +188,10 @@ def extract_images(
             continue
 
         url = urljoin(page.url, src)
+        pattern = excluded_url_pattern(url, settings.excluded_url_patterns)
+        if pattern is not None:
+            rejected.append(Filtered(src=url, alt=alt, reason=f"excluded_url_pattern: {pattern}"))
+            continue
         extension = _extension(url)
         if extension in excluded:
             rejected.append(Filtered(src=url, alt=alt, reason=f"excluded extension {extension}"))

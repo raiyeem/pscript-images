@@ -18,7 +18,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from classify import classify, first_spec, normalize_brand, normalize_condition
+from classify import ReviewCollector, classify, first_spec, normalize_brand, normalize_condition
 from criteria import Criteria, CriteriaError, load_criteria
 from extract import Filtered
 
@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
             "manual test: download one image to _download_test.<ext> at the repo root "
             "and print the DownloadResult. Never called by the pipeline."
         ),
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="with --save: delete output.root (images, manifest, _failed, _tmp) and coverage.json first",
     )
     return parser
 
@@ -156,6 +161,8 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
     tmp_root = pipeline.repo_path(criteria.output.tmp_dir)
     filtered: list[Filtered] = []
     downloaded = failed = conversion_errors = 0
+    saved_rows: list[dict[str, str]] = []
+    review = ReviewCollector()
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
@@ -176,7 +183,9 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                     )
 
                 brand_raw = first_spec(candidate.specs, criteria.extraction.specs_labels.brand)
-                brand, brand_source = normalize_brand(brand_raw, criteria, example_url=candidate.url)
+                brand, brand_source = normalize_brand(
+                    brand_raw, criteria, example_url=candidate.url, review=review
+                )
                 condition = normalize_condition(
                     first_spec(candidate.specs, criteria.extraction.specs_labels.condition), criteria
                 )
@@ -209,24 +218,23 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                     os.replace(result.path, final)
                     counts[folder_key] = index
 
-                    pipeline.append_manifest(
-                        criteria,
-                        {
-                            "file": pipeline.relative_posix(final),
-                            "category": folder_key,
-                            "brand": brand,
-                            "brand_raw": brand_raw,
-                            "brand_source": brand_source,
-                            "condition": condition,
-                            "angle": angle,
-                            "source_url": candidate.url,
-                            "scraped_at": pipeline.utc_now_iso(),
-                            "sha256": pipeline.file_sha256(final),
-                            "criteria_version": version,
-                            "status": "ok",
-                            "error": "",
-                        },
-                    )
+                    row = {
+                        "file": pipeline.relative_posix(final),
+                        "category": folder_key,
+                        "brand": brand,
+                        "brand_raw": brand_raw,
+                        "brand_source": brand_source,
+                        "condition": condition,
+                        "angle": angle,
+                        "source_url": candidate.url,
+                        "scraped_at": pipeline.utc_now_iso(),
+                        "sha256": pipeline.file_sha256(final),
+                        "criteria_version": version,
+                        "status": "ok",
+                        "error": "",
+                    }
+                    pipeline.append_manifest(criteria, row)
+                    saved_rows.append(row)
                     downloaded += 1
                 elif result.path:
                     # The file exists but conversion failed: move it out of the category tree and log it.
@@ -245,13 +253,16 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
         finally:
             browser.close()
 
+    review.flush(criteria)
     _write_filtered_log(Path(criteria.output.filtered_log), filtered)
     try:
         tmp_root.rmdir()  # only removes the folder when it is empty
     except OSError:
         pass
 
+    coverage_path = pipeline.write_coverage(criteria, saved_rows, url, version)
     print(f"{downloaded} downloaded, {failed} failed, {conversion_errors} conversion_errors")
+    print(f"coverage: {coverage_path}")
     return 0
 
 
@@ -277,7 +288,15 @@ def main(argv: list[str] | None = None) -> int:
         print("--dry-run and --save cannot be combined", file=sys.stderr)
         return 2
 
+    if args.reset and not args.save:
+        print("--reset only applies together with --save", file=sys.stderr)
+        return 2
+
     if args.save:
+        if args.reset:
+            import pipeline
+
+            pipeline.reset_outputs(criteria)
         return _save(args.url, criteria, args.criteria, args.limit)
 
     if args.dry_run:

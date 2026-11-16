@@ -3,7 +3,7 @@
 Criteria keys read:
   categories[*].name, categories[*].aliases, categories[*].keywords
   fields.brand.canonical, fields.brand.aliases, fields.brand.open_vocabulary,
-  fields.brand.review_queue
+  fields.brand.placeholders, fields.brand.review_queue
   fields.condition.enum, fields.condition.aliases, fields.condition.default
   extraction.specs_labels.category, extraction.specs_labels.brand,
   extraction.specs_labels.condition
@@ -19,7 +19,8 @@ from typing import Any
 import pipeline
 from criteria import Criteria
 
-REVIEW_COLUMNS = ["raw_value", "count", "example_url", "first_seen"]
+REVIEW_COLUMNS = ["raw_value", "count", "source_urls", "first_seen"]
+SOURCE_URL_SEPARATOR = ";"
 
 
 def first_spec(specs: dict[str, str], labels: list[str]) -> str:
@@ -61,40 +62,80 @@ def classify(text: str, specs: dict[str, Any], criteria: Criteria) -> str | None
     return _keyword_category(text, criteria)
 
 
-def _record_review(criteria: Criteria, raw: str, example_url: str) -> None:
-    """Count one sighting of an unknown brand in the review queue. Never promotes it."""
-    queue = pipeline.repo_path(criteria.fields.brand.review_queue)
-    rows: list[dict[str, str]] = []
-    if queue.exists():
-        with queue.open("r", newline="", encoding="utf-8") as handle:
-            rows = list(csv.DictReader(handle))
-
-    for row in rows:
-        if row["raw_value"] == raw:
-            row["count"] = str(int(row["count"]) + 1)
-            break
-    else:
-        rows.append(
-            {
-                "raw_value": raw,
-                "count": "1",
-                "example_url": example_url,
-                "first_seen": date.today().isoformat(),
-            }
-        )
-
-    queue.parent.mkdir(parents=True, exist_ok=True)
-    with queue.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=REVIEW_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+def _split_urls(value: str) -> list[str]:
+    return [part for part in (piece.strip() for piece in value.split(SOURCE_URL_SEPARATOR)) if part]
 
 
-def normalize_brand(raw: str | None, criteria: Criteria, example_url: str = "") -> tuple[str, str]:
+class ReviewCollector:
+    """Collects unknown brands during a run and writes the review queue once at the end.
+
+    Each row counts distinct source URLs: count == len(source_urls). Merging keeps
+    existing rows, adds new URLs, and never double-counts a URL.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[str, list[str]] = {}
+
+    def add(self, raw: str, source_url: str) -> None:
+        urls = self._pending.setdefault(raw, [])
+        if source_url and source_url not in urls:
+            urls.append(source_url)
+
+    def flush(self, criteria: Criteria) -> None:
+        """Merge pending sightings into the queue file and write it once."""
+        if not self._pending:
+            return
+        queue = pipeline.repo_path(criteria.fields.brand.review_queue)
+        today = date.today().isoformat()
+
+        entries: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        if queue.exists():
+            with queue.open("r", newline="", encoding="utf-8") as handle:
+                for row in csv.DictReader(handle):
+                    raw = row["raw_value"]
+                    legacy_url = row.get("example_url", "")  # pre-M9 schema
+                    urls = _split_urls(row.get("source_urls") or legacy_url)
+                    entries[raw] = {"urls": urls, "first_seen": row.get("first_seen") or today}
+                    order.append(raw)
+
+        for raw, urls in self._pending.items():
+            if raw not in entries:
+                entries[raw] = {"urls": [], "first_seen": today}
+                order.append(raw)
+            for url in urls:
+                if url not in entries[raw]["urls"]:
+                    entries[raw]["urls"].append(url)
+
+        queue.parent.mkdir(parents=True, exist_ok=True)
+        with queue.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=REVIEW_COLUMNS)
+            writer.writeheader()
+            for raw in order:
+                entry = entries[raw]
+                writer.writerow(
+                    {
+                        "raw_value": raw,
+                        "count": len(entry["urls"]),
+                        "source_urls": SOURCE_URL_SEPARATOR.join(entry["urls"]),
+                        "first_seen": entry["first_seen"],
+                    }
+                )
+        self._pending.clear()
+
+
+def normalize_brand(
+    raw: str | None,
+    criteria: Criteria,
+    example_url: str = "",
+    review: ReviewCollector | None = None,
+) -> tuple[str, str]:
     """(canonical brand, source). source is canonical | alias | raw | missing.
 
-    Unknown brands are kept as slugs with source "raw" and added to the review
-    queue. They are never promoted to canonical here.
+    Placeholder values such as "Other" are treated as missing and logged, not queued.
+    Unknown brands are kept as slugs with source "raw" and recorded in the review
+    queue. They are never promoted to canonical here. Pass a ReviewCollector to
+    batch writes; without one, the queue is written immediately.
     """
     missing = criteria.naming.missing_token
     text = (raw or "").strip()
@@ -110,12 +151,21 @@ def normalize_brand(raw: str | None, criteria: Criteria, example_url: str = "") 
     if slug in brand.canonical:
         return (slug, "canonical")
 
+    if lowered in {placeholder.lower() for placeholder in brand.placeholders}:
+        pipeline.append_log(criteria.output.unclassified_log, f"brand placeholder | {text}")
+        return (missing, "missing")
+
     for canonical, aliases in brand.aliases.items():
         if lowered in {alias.lower() for alias in aliases}:
             return (canonical, "alias")
 
     if brand.open_vocabulary:
-        _record_review(criteria, text, example_url)
+        if review is not None:
+            review.add(text, example_url)
+        else:
+            single = ReviewCollector()
+            single.add(text, example_url)
+            single.flush(criteria)
         return (slug, "raw")
 
     pipeline.append_log(criteria.output.unclassified_log, f"brand not in vocabulary | {text}")

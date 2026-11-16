@@ -12,6 +12,7 @@ scrape_log.txt
 unclassified.log
 filtered.log
 conversion_errors.log
+review/brands_unknown.csv
 _download_test.*
 coverage.json
 

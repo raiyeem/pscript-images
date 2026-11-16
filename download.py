@@ -30,6 +30,7 @@ CONTENT_TYPE_EXTENSIONS = {
     "image/webp": ".webp",
 }
 FORMAT_EXTENSIONS = {"jpeg": ".jpg", "png": ".png"}
+JPEG_EXTENSION_ALIASES = {".jpeg": ".jpg", ".jpe": ".jpg"}
 FORMAT_CONTENT_TYPES = {"jpeg": "image/jpeg", "png": "image/png"}
 FORMAT_PIL_NAMES = {"jpeg": "JPEG", "png": "PNG"}
 PART_SUFFIX = ".part"
@@ -71,12 +72,18 @@ def _resolve_path(dest: Path, url: str, content_type: str | None) -> Path | None
     no extension.
     """
     if dest.suffix:
-        return dest
-    url_extension = PurePosixPath(urlsplit(url).path).suffix.lower()
+        normalized = _normalize_extension(dest.suffix)
+        return dest if normalized == dest.suffix else dest.with_suffix(normalized)
+    url_extension = _normalize_extension(PurePosixPath(urlsplit(url).path).suffix.lower())
     extension = url_extension or CONTENT_TYPE_EXTENSIONS.get(content_type or "")
     if not extension:
         return None
     return dest.with_name(dest.name + extension)
+
+
+def _normalize_extension(extension: str) -> str:
+    """JPEG aliases (.jpeg, .jpe) are written as .jpg. Other extensions are unchanged."""
+    return JPEG_EXTENSION_ALIASES.get(extension.lower(), extension)
 
 
 def _output_path(src: Path, target_format: str) -> Path:

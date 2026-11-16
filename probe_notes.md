@@ -216,6 +216,10 @@ This data source does not label image angles; `{angle}` will be `unknown` for al
 
 Condition field is absent on the sampled product page; accepted as unknown for this source. If a labelled condition field is found later, add it to extraction.specs_labels.condition.
 
+## M9 scope
+
+Some pages (Odyssey, Golfkläder) put `Other` in `Subcategory`, so the brand is only in the title. `normalize_brand` does not read titles. Consider a brand-from-title fallback as a future enhancement.
+
 ## Open items
 
 - Probe a product detail page (a URL you give me) to check for `Product` JSON-LD with `brand.name` and `itemCondition`, and to see its image markup.

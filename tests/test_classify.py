@@ -27,7 +27,8 @@ def criteria(tmp_path):
         update={"review_queue": str(tmp_path / "brands_unknown.csv")}
     )
     fields = base.fields.model_copy(update={"brand": brand})
-    return base.model_copy(update={"fields": fields})
+    output = base.output.model_copy(update={"unclassified_log": str(tmp_path / "unclassified.log")})
+    return base.model_copy(update={"fields": fields, "output": output})
 
 
 # --- category -------------------------------------------------------------
@@ -39,6 +40,10 @@ def test_classify_driver_from_spec(criteria):
 
 def test_classify_irons_from_alias(criteria):
     assert classify_module.classify("", {"Category": "Iron"}, criteria) == "Irons"
+
+
+def test_classify_apparel_from_men_apparel_alias(criteria):
+    assert classify_module.classify("", {"Category": "Men Apparel"}, criteria) == "Apparel"
 
 
 def test_classify_putter_from_alt_text(criteria):
@@ -71,13 +76,50 @@ def test_normalize_brand_raw_goes_to_review_queue(criteria):
     assert PRODUCT_URL in queue
 
 
-def test_review_queue_increments_existing_entry(criteria):
+OTHER_URL = "https://assets.foremarket.se/products/example-2.webp"
+
+
+def test_review_queue_counts_distinct_urls(criteria):
+    classify_module.normalize_brand("Kirkland Signature", criteria, example_url=PRODUCT_URL)
+    classify_module.normalize_brand("Kirkland Signature", criteria, example_url=OTHER_URL)
+
+    lines = Path(criteria.fields.brand.review_queue).read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "raw_value,count,source_urls,first_seen"
+    assert len(lines) == 2  # header + one row
+    assert lines[1].split(",")[1] == "2"
+    assert PRODUCT_URL in lines[1] and OTHER_URL in lines[1]
+
+
+def test_review_queue_same_url_counts_once(criteria):
     classify_module.normalize_brand("Kirkland Signature", criteria, example_url=PRODUCT_URL)
     classify_module.normalize_brand("Kirkland Signature", criteria, example_url=PRODUCT_URL)
 
     lines = Path(criteria.fields.brand.review_queue).read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2  # header + one row
+    assert lines[1].split(",")[1] == "1"
+
+
+def test_review_collector_merges_across_runs(criteria):
+    first = classify_module.ReviewCollector()
+    first.add("Kirkland Signature", PRODUCT_URL)
+    first.flush(criteria)
+
+    second = classify_module.ReviewCollector()
+    second.add("Kirkland Signature", OTHER_URL)
+    second.add("Kirkland Signature", PRODUCT_URL)
+    second.flush(criteria)
+
+    lines = Path(criteria.fields.brand.review_queue).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
     assert lines[1].split(",")[1] == "2"
+
+
+def test_normalize_brand_placeholder_other_is_missing_and_not_queued(criteria):
+    assert classify_module.normalize_brand("Other", criteria, example_url=PRODUCT_URL) == (
+        "unknown",
+        "missing",
+    )
+    assert not Path(criteria.fields.brand.review_queue).exists()
+    assert "brand placeholder | Other" in Path(criteria.output.unclassified_log).read_text(encoding="utf-8")
 
 
 def test_normalize_brand_empty(criteria):
