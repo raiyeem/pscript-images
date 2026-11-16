@@ -18,6 +18,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from classify import classify, first_spec, normalize_brand, normalize_condition
 from criteria import Criteria, CriteriaError, load_criteria
 from extract import Filtered
 
@@ -166,7 +167,7 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                 candidates = candidates[:limit]
 
             for candidate in candidates:
-                category = pipeline.classify(criteria, candidate.url, candidate.alt, candidate.specs)
+                category = classify(f"{candidate.url} {candidate.alt or ''}", candidate.specs, criteria)
                 folder_key = category or missing
                 if category is None:
                     pipeline.append_log(
@@ -174,10 +175,12 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                         f"no category match | {candidate.url} | {candidate.alt or '-'}",
                     )
 
-                brand_raw = candidate.specs.get("Subcategory", "").strip()
-                brand_slug = pipeline.slugify(brand_raw) if brand_raw else ""
-                brand = brand_slug or missing
-                brand_source = "raw" if brand_slug else "missing"
+                brand_raw = first_spec(candidate.specs, criteria.extraction.specs_labels.brand)
+                brand, brand_source = normalize_brand(brand_raw, criteria, example_url=candidate.url)
+                condition = normalize_condition(
+                    first_spec(candidate.specs, criteria.extraction.specs_labels.condition), criteria
+                )
+                angle = missing  # M8 not started
 
                 result = download_image(
                     candidate.url, tmp_root / uuid.uuid4().hex, page=page, criteria=criteria
@@ -194,8 +197,8 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                             criteria,
                             category=folder_key,
                             brand=brand,
-                            condition=missing,
-                            angle=missing,
+                            condition=condition,
+                            angle=angle,
                             index=index,
                             ext=ext,
                         )
@@ -214,8 +217,8 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                             "brand": brand,
                             "brand_raw": brand_raw,
                             "brand_source": brand_source,
-                            "condition": missing,
-                            "angle": missing,
+                            "condition": condition,
+                            "angle": angle,
                             "source_url": candidate.url,
                             "scraped_at": pipeline.utc_now_iso(),
                             "sha256": pipeline.file_sha256(final),

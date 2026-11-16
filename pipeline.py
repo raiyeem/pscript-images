@@ -145,32 +145,6 @@ def slugify(value: str) -> str:
     return _SLUG_SPLIT.sub("-", value.strip().lower()).strip("-")
 
 
-def category_from_specs(criteria: Criteria, specs: dict[str, str]) -> str | None:
-    """Match specs["Category"] case-insensitively against category names and aliases. First match wins."""
-    value = specs.get("Category", "").strip().lower()
-    if not value:
-        return None
-    for category in criteria.categories:
-        candidates = [category.name, *category.aliases]
-        if any(candidate.lower() == value for candidate in candidates):
-            return category.name
-    return None
-
-
-def keyword_category(criteria: Criteria, url: str, alt: str | None) -> str | None:
-    """Fallback: first category whose keyword appears in the URL or alt text."""
-    text = f"{url} {alt or ''}".lower()
-    for category in criteria.categories:
-        if any(keyword.lower() in text for keyword in category.keywords):
-            return category.name
-    return None
-
-
-def classify(criteria: Criteria, url: str, alt: str | None, specs: dict[str, str]) -> str | None:
-    """Spec Category first; keyword fallback only when the spec is absent or unrecognised."""
-    return category_from_specs(criteria, specs) or keyword_category(criteria, url, alt)
-
-
 def existing_counts(criteria: Criteria) -> dict[str, int]:
     """Rows already in the manifest, per category value. Used to continue numbering."""
     manifest = repo_path(criteria.output.manifest)
