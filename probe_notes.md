@@ -222,6 +222,12 @@ Some pages (Odyssey, Golfkläder) put `Other` in `Subcategory`, so the brand is 
 
 Technical debt: manifest lacks condition_raw — condition aliases cannot be renormalized retroactively. If a manifest migration is ever worth doing, add condition_raw and re-scrape; otherwise this is a known limitation of older manifests.
 
+## M10 scope
+
+Known limitation: robots.txt `Allow:` directives are not parsed; only `Disallow:` prefix rules and `Crawl-delay` are honored. Combined rules like `Disallow: /product/` with `Allow: /product/specific-slug` will still block the specific slug. Preserves safe direction (block when disallowed) but is not fully RFC 9309 compliant.
+
+Coverage report scope: `coverage.json`'s top-level `criteria_version` is the version of the run that produced the report — not every manifest row's version. After a `--no-resume` refresh against a different `criteria.yml`, the manifest can hold rows from multiple criteria versions, but the coverage report still describes only the current run. The manifest's per-row `criteria_version` column is the authoritative record of what produced each row's bytes.
+
 ## Open items
 
 - Probe a product detail page (a URL you give me) to check for `Product` JSON-LD with `brand.name` and `itemCondition`, and to see its image markup.
