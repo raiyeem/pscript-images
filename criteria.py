@@ -125,6 +125,7 @@ class Politeness(_Strict):
     delay_seconds: float = Field(ge=0)
     max_images_per_page: int = Field(ge=1)
     respect_robots: bool
+    ua_name: str = Field(min_length=1)
     user_agent: str = Field(min_length=1)
     connect_timeout_s: float = Field(gt=0)
     read_timeout_s: float = Field(gt=0)

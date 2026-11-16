@@ -15,12 +15,15 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 import uuid
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from classify import ReviewCollector, classify, first_spec, normalize_brand, normalize_condition
 from criteria import Criteria, CriteriaError, load_criteria
 from extract import Filtered
+from politeness import blocking_rule, effective_delay, fetch_robots, parse_robots
 
 _DOWNLOAD_TEST_STEM = Path(__file__).resolve().parent / "_download_test"
 _KNOWN_MAGIC = {
@@ -104,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --renormalize: also rename files on disk to the new brand slug (destructive)",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="with --save: download every candidate, even if its source_url is already in the manifest",
+    )
     return parser
 
 
@@ -163,7 +171,14 @@ def _dry_run(url: str, criteria: Criteria, limit: int | None) -> int:
     return 0
 
 
-def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) -> int:
+def _save(
+    url: str,
+    criteria: Criteria,
+    criteria_file: Path,
+    limit: int | None,
+    no_resume: bool = False,
+    delay: float = 0.0,
+) -> int:
     from playwright.sync_api import sync_playwright
 
     import pipeline
@@ -176,7 +191,12 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
     counts = pipeline.existing_counts(criteria)
     tmp_root = pipeline.repo_path(criteria.output.tmp_dir)
     filtered: list[Filtered] = []
-    downloaded = failed = conversion_errors = 0
+    downloaded = failed = conversion_errors = skipped = 0
+    # One manifest row per source_url. Existing rows are either skipped (resume) or
+    # refreshed in place (--no-resume); a refresh never adds a row or a file.
+    existing = pipeline.existing_rows_by_url(criteria)
+    updates: dict[str, dict[str, str]] = {}
+    pending_sleep = False
     saved_rows: list[dict[str, str]] = []
     review = ReviewCollector()
 
@@ -190,6 +210,50 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                 candidates = candidates[:limit]
 
             for candidate in candidates:
+                existing_row = existing.get(candidate.url)
+                if existing_row is not None and not no_resume:
+                    skipped += 1
+                    continue
+
+                if existing_row is not None:
+                    # --no-resume: re-download into the file the manifest already names.
+                    # No classification, no new index, no new row. A failure leaves the row as it was.
+                    if pending_sleep:
+                        if delay > 0:
+                            time.sleep(delay)
+                        pending_sleep = False
+                    result = download_image(
+                        candidate.url, tmp_root / uuid.uuid4().hex, page=page, criteria=criteria
+                    )
+                    if result.status == "ok":
+                        target = pipeline.manifest_file_path(existing_row["file"])
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(result.path, target)
+                        updates[candidate.url] = {
+                            **existing_row,
+                            "sha256": pipeline.file_sha256(target),
+                            "scraped_at": pipeline.utc_now_iso(),
+                            "criteria_version": version,
+                            "status": "ok",
+                            "error": "",
+                        }
+                        downloaded += 1
+                        pending_sleep = True
+                    elif result.path:
+                        failed_path = pipeline.move_to_failed(criteria, result.path)
+                        pipeline.append_log(
+                            criteria.output.conversion_errors_log,
+                            f"{candidate.url} | {failed_path} | {result.error_message}",
+                        )
+                        conversion_errors += 1
+                    else:
+                        pipeline.append_log(
+                            criteria.output.scrape_log,
+                            f"{candidate.url} | {result.status} | {result.error_message}",
+                        )
+                        failed += 1
+                    continue
+
                 category = classify(f"{candidate.url} {candidate.alt or ''}", candidate.specs, criteria)
                 folder_key = category or missing
                 if category is None:
@@ -206,6 +270,13 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                     first_spec(candidate.specs, criteria.extraction.specs_labels.condition), criteria
                 )
                 angle = missing  # M8 not started
+
+                # Politeness: wait between downloads. Sleeping happens before the next download
+                # after a success, so there is no wait before the first image or after the last.
+                if pending_sleep:
+                    if delay > 0:
+                        time.sleep(delay)
+                    pending_sleep = False
 
                 result = download_image(
                     candidate.url, tmp_root / uuid.uuid4().hex, page=page, criteria=criteria
@@ -252,6 +323,7 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
                     pipeline.append_manifest(criteria, row)
                     saved_rows.append(row)
                     downloaded += 1
+                    pending_sleep = True
                 elif result.path:
                     # The file exists but conversion failed: move it out of the category tree and log it.
                     failed_path = pipeline.move_to_failed(criteria, result.path)
@@ -269,6 +341,10 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
         finally:
             browser.close()
 
+    if updates:
+        pipeline.replace_manifest_rows(criteria, updates)
+        saved_rows.extend(updates.values())
+
     review.flush(criteria)
     _write_filtered_log(Path(criteria.output.filtered_log), filtered)
     try:
@@ -277,9 +353,32 @@ def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) 
         pass
 
     coverage_path = pipeline.write_coverage(criteria, saved_rows, url, version)
-    print(f"{downloaded} downloaded, {failed} failed, {conversion_errors} conversion_errors")
+    print(
+        f"{downloaded} downloaded, {skipped} skipped, {failed} failed, "
+        f"{conversion_errors} conversion_errors"
+    )
     print(f"coverage: {coverage_path}")
     return 0
+
+
+def _robots_gate(criteria: Criteria, url: str) -> tuple[bool, float]:
+    """(allowed, delay). Blocks only on an explicit Disallow for our UA; a missing robots.txt proceeds."""
+    politeness = criteria.politeness
+    text, note = fetch_robots(url, politeness.user_agent, politeness.connect_timeout_s)
+    if text is None:
+        print(f"warning: {note}", file=sys.stderr)
+        return (True, effective_delay(criteria, None))
+    policy = parse_robots(text, politeness.ua_name)
+    rule = blocking_rule(policy, url)
+    if rule is not None:
+        path = urlsplit(url).path or "/"
+        print(
+            f"warning: robots.txt disallows {politeness.ua_name} from {path} "
+            f"(rule: Disallow: {rule}). Nothing downloaded.",
+            file=sys.stderr,
+        )
+        return (False, 0.0)
+    return (True, effective_delay(criteria, policy.crawl_delay))
 
 
 def _propose(criteria: Criteria) -> int:
@@ -348,11 +447,23 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.save:
+        delay = criteria.politeness.delay_seconds
+        if criteria.politeness.respect_robots:
+            allowed, delay = _robots_gate(criteria, args.url)
+            if not allowed:
+                return 1  # checked before --reset, so a blocked run deletes nothing
         if args.reset:
             import pipeline
 
             pipeline.reset_outputs(criteria)
-        return _save(args.url, criteria, args.criteria, args.limit)
+        return _save(
+            args.url,
+            criteria,
+            args.criteria,
+            args.limit,
+            no_resume=args.no_resume,
+            delay=delay,
+        )
 
     if args.dry_run:
         return _dry_run(args.url, criteria, args.limit)

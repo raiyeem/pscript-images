@@ -55,8 +55,12 @@ def repo_path(value: str | Path) -> Path:
 
 
 def relative_posix(path: str | Path) -> str:
-    """Path relative to the repo root, with forward slashes."""
-    return Path(path).resolve().relative_to(REPO_ROOT).as_posix()
+    """Path relative to the repo root, with forward slashes. Paths outside the repo are returned as-is."""
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def criteria_version(path: str | Path) -> str:
@@ -158,6 +162,40 @@ def existing_counts(criteria: Criteria) -> dict[str, int]:
             category = row.get("category", "")
             counts[category] = counts.get(category, 0) + 1
     return counts
+
+
+def existing_rows_by_url(criteria: Criteria) -> dict[str, dict[str, str]]:
+    """Manifest rows keyed by exact source_url. The manifest holds one row per source_url."""
+    manifest = repo_path(criteria.output.manifest)
+    if not manifest.exists():
+        return {}
+    with manifest.open("r", newline="", encoding="utf-8") as handle:
+        return {row["source_url"]: row for row in csv.DictReader(handle) if row.get("source_url")}
+
+
+def manifest_file_path(value: str) -> Path:
+    """Resolve a manifest file column value to a path. Relative values are under the repo root."""
+    path = Path(value)
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+def replace_manifest_rows(criteria: Criteria, updates: dict[str, dict[str, str]]) -> int:
+    """Rewrite the manifest, swapping in updated rows by source_url. Returns rows replaced."""
+    manifest = repo_path(criteria.output.manifest)
+    with manifest.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    replaced = 0
+    for index, row in enumerate(rows):
+        if row["source_url"] in updates:
+            rows[index] = updates[row["source_url"]]
+            replaced += 1
+    temp = manifest.with_name(manifest.name + ".tmp")
+    with temp.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=MANIFEST_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(temp, manifest)
+    return replaced
 
 
 def append_manifest(criteria: Criteria, row: dict[str, Any]) -> None:
