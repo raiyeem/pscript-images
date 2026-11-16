@@ -53,6 +53,10 @@ live in that file only. Code reads them; code never embeds them.
 - If a pip install fails to build on Python 3.14, stop and report. Do not
   silently downgrade a package or fall back to another Python.
 
+## Politeness
+
+- Politeness delay: `politeness.delay_seconds` sleeps after each successful download, within a product. Between products, the natural gap (page load + extraction, 11–40s) exceeds `delay_seconds`, so no additional sleep fires. This is intentional: the delay exists to space out HTTP requests to the asset host, not to add latency to product transitions.
+
 ## MCP usage
 
 - **Playwright MCP**: inspect target pages, verify selectors, check image
