@@ -13,6 +13,7 @@ Classification is a keyword stub in --save. The real classifier comes in M6.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 import os
 import sys
 import time
@@ -31,6 +32,18 @@ _KNOWN_MAGIC = {
     "52494646": "RIFF (WebP container)",
     "89504e47": "PNG",
 }
+
+
+@dataclass
+class SaveTotals:
+    """What one save run (one product page) produced. Accumulated across products in a crawl."""
+
+    downloaded: int = 0
+    skipped: int = 0
+    failed: int = 0
+    conversion_errors: int = 0
+    saved_rows: list[dict[str, str]] = field(default_factory=list)
+    filtered: list[Filtered] = field(default_factory=list)
 
 
 def _positive_int(text: str) -> int:
@@ -75,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=_positive_int,
         default=None,
-        help="keep only the first N candidates",
+        help="at most N images per product. Applies per product, not to the whole crawl.",
     )
     parser.add_argument(
         "--download-one",
@@ -117,6 +130,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CATEGORY_URL",
         default=None,
         help="list the product URLs on a category page. Discovery only: no downloads, no manifest changes.",
+    )
+    parser.add_argument(
+        "--crawl-and-save",
+        metavar="CATEGORY_URL",
+        default=None,
+        help=(
+            "discover a category's product URLs and save each one. Requires --save. "
+            "Resume is always on; --reset runs once before the first product."
+        ),
     )
     return parser
 
@@ -184,7 +206,7 @@ def _save(
     limit: int | None,
     no_resume: bool = False,
     delay: float = 0.0,
-) -> int:
+) -> SaveTotals:
     from playwright.sync_api import sync_playwright
 
     import pipeline
@@ -270,7 +292,7 @@ def _save(
 
                 brand_raw = first_spec(candidate.specs, criteria.extraction.specs_labels.brand)
                 brand, brand_source = normalize_brand(
-                    brand_raw, criteria, example_url=candidate.url, review=review
+                    brand_raw, criteria, product_url=url, review=review
                 )
                 condition = normalize_condition(
                     first_spec(candidate.specs, criteria.extraction.specs_labels.condition), criteria
@@ -352,19 +374,33 @@ def _save(
         saved_rows.extend(updates.values())
 
     review.flush(criteria)
-    _write_filtered_log(Path(criteria.output.filtered_log), filtered)
     try:
         tmp_root.rmdir()  # only removes the folder when it is empty
     except OSError:
         pass
 
-    coverage_path = pipeline.write_coverage(criteria, saved_rows, url, version)
+    return SaveTotals(
+        downloaded=downloaded,
+        skipped=skipped,
+        failed=failed,
+        conversion_errors=conversion_errors,
+        saved_rows=saved_rows,
+        filtered=filtered,
+    )
+
+
+def _finish_run(source_url: str, criteria: Criteria, criteria_file: Path, totals: SaveTotals) -> None:
+    """Write the filtered log and coverage report for a run, then print its summary."""
+    import pipeline
+
+    _write_filtered_log(Path(criteria.output.filtered_log), totals.filtered)
+    version = pipeline.criteria_version(criteria_file)
+    coverage_path = pipeline.write_coverage(criteria, totals.saved_rows, source_url, version)
     print(
-        f"{downloaded} downloaded, {skipped} skipped, {failed} failed, "
-        f"{conversion_errors} conversion_errors"
+        f"{totals.downloaded} downloaded, {totals.skipped} skipped, {totals.failed} failed, "
+        f"{totals.conversion_errors} conversion_errors"
     )
     print(f"coverage: {coverage_path}")
-    return 0
 
 
 def _crawl(category_url: str, criteria: Criteria) -> int:
@@ -415,6 +451,86 @@ def pipeline_repo_path(value: str | Path) -> Path:
     return pipeline.repo_path(value)
 
 
+def _log_product(
+    criteria: Criteria,
+    category_url: str,
+    product_url: str,
+    result: str,
+    downloaded: int,
+    skipped: int,
+    error: str,
+) -> None:
+    import pipeline
+
+    line = (
+        f"{pipeline.utc_now_iso()} | {category_url} | product={product_url} | result={result} | "
+        f"downloaded={downloaded} | skipped={skipped} | error={error or '-'}"
+    )
+    pipeline.append_log(criteria.crawl.log_path, line)
+
+
+def _crawl_and_save(
+    category_url: str,
+    criteria: Criteria,
+    criteria_file: Path,
+    limit: int | None,
+    reset: bool,
+) -> int:
+    """Discover a category's product URLs and save each one. Resume is always on."""
+    import pipeline
+    from discover import discover_product_urls
+
+    delay = criteria.politeness.delay_seconds
+    if criteria.politeness.respect_robots:
+        allowed, delay = check_robots(category_url, criteria)
+        if not allowed:
+            return 1  # blocked before discovery and before --reset
+
+    try:
+        product_urls = discover_product_urls(category_url, criteria)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    total_products = len(product_urls)
+    print(f"Discovered {total_products} URLs from {category_url}")
+    if reset:
+        pipeline.reset_outputs(criteria)  # once, before the first product
+
+    totals = SaveTotals()
+    succeeded = failed_products = 0
+    for number, product_url in enumerate(product_urls, start=1):
+        print(f"[{number}/{total_products}] {product_url}")
+        try:
+            product = _save(product_url, criteria, criteria_file, limit, no_resume=False, delay=delay)
+        except Exception as exc:  # one bad product must not stop the crawl
+            message = str(exc) or type(exc).__name__
+            failed_products += 1
+            _log_product(criteria, category_url, product_url, "failed", 0, 0, message)
+            print(f"[{number}/{total_products}] failed: {message}")
+            continue
+
+        succeeded += 1
+        totals.downloaded += product.downloaded
+        totals.skipped += product.skipped
+        totals.failed += product.failed
+        totals.conversion_errors += product.conversion_errors
+        totals.saved_rows.extend(product.saved_rows)
+        totals.filtered.extend(product.filtered)
+        _log_product(criteria, category_url, product_url, "ok", product.downloaded, product.skipped, "-")
+        print(
+            f"[{number}/{total_products}] ok: downloaded={product.downloaded} "
+            f"skipped={product.skipped} failed={product.failed}"
+        )
+
+    _finish_run(category_url, criteria, criteria_file, totals)
+    print(
+        f"Crawl complete: {succeeded} products processed, {failed_products} failed, "
+        f"{totals.downloaded} total images downloaded, {totals.skipped} skipped"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -429,6 +545,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.rename_files and not args.renormalize:
         print("--rename-files only applies together with --renormalize", file=sys.stderr)
         return 2
+
+    if args.crawl_and_save:
+        if not args.save:
+            print("--crawl-and-save requires --save", file=sys.stderr)
+            return 2
+        if args.no_resume:
+            print("--no-resume is not meaningful with --crawl-and-save (resume is always on)", file=sys.stderr)
+            return 2
+        if args.crawl or args.dry_run:
+            print("--crawl-and-save cannot be combined with --crawl or --dry-run", file=sys.stderr)
+            return 2
+        return _crawl_and_save(args.crawl_and_save, criteria, args.criteria, args.limit, args.reset)
 
     if args.crawl:
         return _crawl(args.crawl, criteria)
@@ -464,7 +592,7 @@ def main(argv: list[str] | None = None) -> int:
             import pipeline
 
             pipeline.reset_outputs(criteria)
-        return _save(
+        totals = _save(
             args.url,
             criteria,
             args.criteria,
@@ -472,6 +600,8 @@ def main(argv: list[str] | None = None) -> int:
             no_resume=args.no_resume,
             delay=delay,
         )
+        _finish_run(args.url, criteria, args.criteria, totals)
+        return 0
 
     if args.dry_run:
         return _dry_run(args.url, criteria, args.limit)

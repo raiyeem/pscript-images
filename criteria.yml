@@ -38,11 +38,14 @@ fields:
       - pxg
       - honma
       - xxio
+      - odyssey
+      - scotty-cameron
     aliases:
       taylormade: ["taylor made", "taylormade golf", "tm"]
       callaway: ["callaway golf"]
       titleist: ["titleist golf"]
       ping: ["ping golf"]
+      scotty-cameron: ["scotty cameron", "titleist scotty cameron"]
       wilson: ["wilsson"]
   condition:
     open_vocabulary: false

@@ -188,7 +188,7 @@ def renormalize_manifest(
     changed = renamed = errors = 0
     for row in rows:
         old_brand, old_source = row["brand"], row["brand_source"]
-        new_brand, new_source, _ = resolve_brand(row["brand_raw"], criteria)
+        new_brand, new_source, _ = resolve_brand(row["brand_raw"], criteria, product_url="")
         if (new_brand, new_source) == (old_brand, old_source):
             continue
 

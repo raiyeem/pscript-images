@@ -222,6 +222,8 @@ Some pages (Odyssey, Golfkläder) put `Other` in `Subcategory`, so the brand is 
 
 Technical debt: manifest lacks condition_raw — condition aliases cannot be renormalized retroactively. If a manifest migration is ever worth doing, add condition_raw and re-scrape; otherwise this is a known limitation of older manifests.
 
+Follow-up: `--renormalize` does not clean the review queue. After a brand is promoted to canonical, its row remains in `review/brands_unknown.csv`. Correct fix is to remove queue entries whose raw_value now resolves to canonical or alias. Deferred.
+
 ## M10 scope
 
 Known limitation: robots.txt `Allow:` directives are not parsed; only `Disallow:` prefix rules and `Crawl-delay` are honored. Combined rules like `Disallow: /product/` with `Allow: /product/specific-slug` will still block the specific slug. Preserves safe direction (block when disallowed) but is not fully RFC 9309 compliant.

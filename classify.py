@@ -76,10 +76,11 @@ class ReviewCollector:
     def __init__(self) -> None:
         self._pending: dict[str, list[str]] = {}
 
-    def add(self, raw: str, source_url: str) -> None:
+    def add(self, raw: str, product_url: str) -> None:
+        """Record one product page where this raw brand was seen. Image URLs are never recorded."""
         urls = self._pending.setdefault(raw, [])
-        if source_url and source_url not in urls:
-            urls.append(source_url)
+        if product_url and product_url not in urls:
+            urls.append(product_url)
 
     def flush(self, criteria: Criteria) -> None:
         """Merge pending sightings into the queue file and write it once."""
@@ -130,8 +131,11 @@ ACTION_OUT_OF_VOCABULARY = "not_in_vocabulary"
 ACTION_QUEUE = "queue"
 
 
-def resolve_brand(raw: str | None, criteria: Criteria) -> tuple[str, str, str | None]:
+def resolve_brand(raw: str | None, criteria: Criteria, product_url: str) -> tuple[str, str, str | None]:
     """Pure brand resolution. Returns (brand, source, action). No logging, no file writes.
+
+    product_url is accepted for symmetry with normalize_brand. This function never records
+    anything, so it is not used here.
 
     source is canonical | alias | raw | missing. action says what the caller should
     record: ACTION_PLACEHOLDER or ACTION_OUT_OF_VOCABULARY (log), ACTION_QUEUE (review
@@ -167,7 +171,7 @@ def resolve_brand(raw: str | None, criteria: Criteria) -> tuple[str, str, str | 
 def normalize_brand(
     raw: str | None,
     criteria: Criteria,
-    example_url: str = "",
+    product_url: str = "",
     review: ReviewCollector | None = None,
 ) -> tuple[str, str]:
     """(canonical brand, source). source is canonical | alias | raw | missing.
@@ -177,7 +181,7 @@ def normalize_brand(
     queue. They are never promoted to canonical here. Pass a ReviewCollector to
     batch writes; without one, the queue is written immediately.
     """
-    brand, source, action = resolve_brand(raw, criteria)
+    brand, source, action = resolve_brand(raw, criteria, product_url)
     text = (raw or "").strip()
     if action == ACTION_PLACEHOLDER:
         pipeline.append_log(criteria.output.unclassified_log, f"brand placeholder | {text}")
@@ -185,10 +189,10 @@ def normalize_brand(
         pipeline.append_log(criteria.output.unclassified_log, f"brand not in vocabulary | {text}")
     elif action == ACTION_QUEUE:
         if review is not None:
-            review.add(text, example_url)
+            review.add(text, product_url)
         else:
             single = ReviewCollector()
-            single.add(text, example_url)
+            single.add(text, product_url)
             single.flush(criteria)
     return (brand, source)
 
