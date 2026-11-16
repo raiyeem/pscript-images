@@ -134,6 +134,7 @@ extraction:
     DamagedCondition: poor
   specs_labels:
     brand: ["Subcategory"]
+    category: ["Category"]
     condition: [] # add labels here if a condition field is ever found
   min_dimension: 100
   excluded_extensions: [.svg, .gif]

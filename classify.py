@@ -5,11 +5,9 @@ Criteria keys read:
   fields.brand.canonical, fields.brand.aliases, fields.brand.open_vocabulary,
   fields.brand.review_queue
   fields.condition.enum, fields.condition.aliases, fields.condition.default
-  extraction.specs_labels.brand, extraction.specs_labels.condition
+  extraction.specs_labels.category, extraction.specs_labels.brand,
+  extraction.specs_labels.condition
   output.unclassified_log, naming.missing_token
-
-The category spec label "Category" is a literal for now. It should move to
-extraction.specs_labels.category once that key is approved.
 """
 
 from __future__ import annotations
@@ -21,7 +19,6 @@ from typing import Any
 import pipeline
 from criteria import Criteria
 
-CATEGORY_SPEC_LABEL = "Category"
 REVIEW_COLUMNS = ["raw_value", "count", "example_url", "first_seen"]
 
 
@@ -56,7 +53,7 @@ def classify(text: str, specs: dict[str, Any], criteria: Criteria) -> str | None
 
     The caller decides whether None becomes "unknown".
     """
-    spec_value = (specs.get(CATEGORY_SPEC_LABEL) or "").strip()
+    spec_value = first_spec(specs, criteria.extraction.specs_labels.category)
     if spec_value:
         matched = _category_from_spec(spec_value, criteria)
         if matched is not None:

@@ -90,6 +90,7 @@ class Angles(_Strict):
 
 class SpecsLabels(_Strict):
     brand: list[str]
+    category: list[str]
     condition: list[str]
 
 
