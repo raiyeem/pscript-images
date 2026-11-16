@@ -128,7 +128,7 @@ extraction:
     DamagedCondition: poor
   specs_labels:
     brand: ["Subcategory"]
-    condition: []      # add labels here if a condition field is ever found
+    condition: [] # add labels here if a condition field is ever found
 
 politeness:
   delay_seconds: 1.5
