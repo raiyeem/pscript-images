@@ -36,6 +36,7 @@ class Output(_Strict):
     unclassified_log: str
     coverage_report: str
     review_dir: str
+    filtered_log: str
 
 
 class Naming(_Strict):
@@ -94,6 +95,22 @@ class Extraction(_Strict):
     condition_keys: list[str]
     condition_map: dict[str, str]
     specs_labels: SpecsLabels
+    min_dimension: int = Field(ge=1)
+    excluded_extensions: list[str]
+    scroll_steps: int = Field(ge=1)
+    scroll_wait_ms: int = Field(ge=0)
+    wait_for_selector: str = Field(min_length=1)
+    wait_timeout_ms: int = Field(ge=1)
+
+    @field_validator("excluded_extensions")
+    @classmethod
+    def _extensions_are_lowercase_with_dot(cls, value: list[str]) -> list[str]:
+        for extension in value:
+            if not extension.startswith(".") or extension != extension.lower():
+                raise ValueError(
+                    f"extension {extension!r} must start with '.' and be lowercase"
+                )
+        return value
 
 
 class Politeness(_Strict):

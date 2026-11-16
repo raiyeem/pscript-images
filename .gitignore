@@ -10,6 +10,7 @@ images/
 *.part
 scrape_log.txt
 unclassified.log
+filtered.log
 coverage.json
 
 # Tooling

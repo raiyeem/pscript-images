@@ -173,6 +173,17 @@ Conclusion for the M4 downloader:
 - So an in-page `fetch()` will not work as a primary path, and it will not work as a fallback either.
 - The 200 and size above were observed through the browser's network stack, not from page JavaScript. The downloader needs a request that isn't subject to page CORS. Playwright's request API (`context.request` / `page.request`, which runs outside page JS and shares the browser's cookies) is the likely candidate. **I did not test that here.** Test it before choosing it as primary.
 
+### Extraction readiness
+
+The gallery renders after the `load` event. Extraction waits for a `<dt>` selector (spec table rendered), then for at least one `<img>` with `naturalWidth >= extraction.min_dimension` and `naturalHeight >= extraction.min_dimension`. Both waits are gated by `extraction.wait_timeout_ms`. A timeout raises `RuntimeError`; it never returns an empty list. See criteria.yml for the selector and timeout.
+
+### Classification signal (for M6)
+
+- The specs table contains a `Category` field alongside `Subcategory`. Observed value on this page: `Category: Iron`. `extract_images` captures both in `specs`.
+- M6's `classify()` must try `specs.get("Category")` first, normalising it against `criteria.categories[*].name` and `aliases`. For example, `Iron` matches the `Irons` category through its alias `iron`.
+- Fall back to keyword matching only when the spec is absent or unrecognised.
+- `heading` is `None` for this source, because the `<h1>` sits after the gallery in the DOM. The keyword fallback therefore has less to work with here.
+
 ## Follow-up: Python requests download test, thumbnail alts, condition coverage
 
 ### Python `requests` download of the main image

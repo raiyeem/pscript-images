@@ -7,6 +7,7 @@ output:
   unclassified_log: unclassified.log
   coverage_report: coverage.json
   review_dir: review
+  filtered_log: filtered.log
 
 naming:
   folder_template: "{category}"
@@ -129,6 +130,12 @@ extraction:
   specs_labels:
     brand: ["Subcategory"]
     condition: [] # add labels here if a condition field is ever found
+  min_dimension: 100
+  excluded_extensions: [.svg, .gif]
+  scroll_steps: 5
+  scroll_wait_ms: 1500
+  wait_for_selector: "dt"     # element that proves SSR content is rendered
+  wait_timeout_ms: 15000
 
 politeness:
   delay_seconds: 1.5
