@@ -11,6 +11,8 @@ images/
 scrape_log.txt
 unclassified.log
 filtered.log
+conversion_errors.log
+_download_test.*
 coverage.json
 
 # Tooling

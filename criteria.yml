@@ -8,6 +8,9 @@ output:
   coverage_report: coverage.json
   review_dir: review
   filtered_log: filtered.log
+  conversion_errors_log: conversion_errors.log
+  image_format: jpeg     # one of: jpeg, png, original
+  jpeg_quality: 90       # 1-100, ignored if format is png or original
 
 naming:
   folder_template: "{category}"
@@ -141,6 +144,9 @@ politeness:
   delay_seconds: 1.5
   max_images_per_page: 50
   respect_robots: true
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  connect_timeout_s: 5
+  read_timeout_s: 30
 
 scope:
   page_type: product

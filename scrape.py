@@ -3,19 +3,30 @@
 Implemented so far:
   --validate-only   load and validate criteria.yml
   --dry-run         open the product page, list image candidates, download nothing
-  --limit N         keep only the first N candidates (dry-run output)
+  --save            open the product page, download candidates, write files and manifest rows
+  --limit N         keep only the first N candidates
+  --download-one    manual test of the downloader (never called by the pipeline)
 
-Not implemented yet: downloading, classification, manifest, coverage.
+Classification is a keyword stub in --save. The real classifier comes in M6.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import uuid
 from pathlib import Path
 
 from criteria import Criteria, CriteriaError, load_criteria
 from extract import Filtered
+
+_DOWNLOAD_TEST_STEM = Path(__file__).resolve().parent / "_download_test"
+_KNOWN_MAGIC = {
+    "ffd8ff": "JPEG",
+    "52494646": "RIFF (WebP container)",
+    "89504e47": "PNG",
+}
 
 
 def _positive_int(text: str) -> int:
@@ -52,12 +63,42 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--save",
+        action="store_true",
+        help="download candidates into the category folders and append manifest rows",
+    )
+    parser.add_argument(
         "--limit",
         type=_positive_int,
         default=None,
         help="keep only the first N candidates",
     )
+    parser.add_argument(
+        "--download-one",
+        metavar="URL",
+        default=None,
+        help=(
+            "manual test: download one image to _download_test.<ext> at the repo root "
+            "and print the DownloadResult. Never called by the pipeline."
+        ),
+    )
     return parser
+
+
+def _download_one(url: str, criteria: Criteria) -> int:
+    from download import download_image
+
+    result = download_image(url, _DOWNLOAD_TEST_STEM, criteria=criteria)
+    print(result)
+    if result.path is None:
+        return 1
+    data = Path(result.path).read_bytes()
+    magic = data[:4].hex()
+    label = next((name for sig, name in _KNOWN_MAGIC.items() if magic.startswith(sig)), "unrecognised")
+    print(f"file: {result.path}")
+    print(f"size: {len(data)} bytes")
+    print(f"magic: {magic} ({label})")
+    return 0 if result.status == "ok" else 1
 
 
 def _filtered_line(item: Filtered) -> str:
@@ -100,6 +141,112 @@ def _dry_run(url: str, criteria: Criteria, limit: int | None) -> int:
     return 0
 
 
+def _save(url: str, criteria: Criteria, criteria_file: Path, limit: int | None) -> int:
+    from playwright.sync_api import sync_playwright
+
+    import pipeline
+    from download import download_image
+    from extract import extract_images
+
+    missing = criteria.naming.missing_token
+    pipeline.ensure_folders(criteria)
+    version = pipeline.criteria_version(criteria_file)
+    counts = pipeline.existing_counts(criteria)
+    tmp_root = pipeline.repo_path(criteria.output.root) / "_tmp"
+    filtered: list[Filtered] = []
+    downloaded = failed = conversion_errors = 0
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.goto(url, wait_until="load")
+            candidates = extract_images(page, criteria, filtered=filtered)
+            if limit is not None:
+                candidates = candidates[:limit]
+
+            for candidate in candidates:
+                category = pipeline.keyword_category(criteria, candidate.url, candidate.alt)
+                folder_key = category or missing
+                if category is None:
+                    pipeline.append_log(
+                        criteria.output.unclassified_log,
+                        f"no category keyword | {candidate.url} | {candidate.alt or '-'}",
+                    )
+
+                result = download_image(
+                    candidate.url, tmp_root / uuid.uuid4().hex, page=page, criteria=criteria
+                )
+
+                if result.status == "ok":
+                    folder = pipeline.category_folder(criteria, category)
+                    folder.mkdir(parents=True, exist_ok=True)
+                    ext = Path(result.path).suffix.lstrip(".")
+                    brand_raw = candidate.specs.get("Subcategory", "")
+
+                    index = counts.get(folder_key, 0) + 1
+                    while True:
+                        name = pipeline.build_filename(
+                            criteria,
+                            category=folder_key,
+                            brand=missing,
+                            condition=missing,
+                            angle=missing,
+                            index=index,
+                            ext=ext,
+                        )
+                        final = folder / name
+                        if not final.exists():
+                            break
+                        index += 1
+                    os.replace(result.path, final)
+                    counts[folder_key] = index
+
+                    pipeline.append_manifest(
+                        criteria,
+                        {
+                            "file": pipeline.relative_posix(final),
+                            "category": folder_key,
+                            "brand": missing,
+                            "brand_raw": brand_raw,
+                            "brand_source": "raw" if brand_raw else "missing",
+                            "condition": missing,
+                            "angle": missing,
+                            "source_url": candidate.url,
+                            "scraped_at": pipeline.utc_now_iso(),
+                            "sha256": pipeline.file_sha256(final),
+                            "criteria_version": version,
+                            "status": "ok",
+                            "error": "",
+                        },
+                    )
+                    downloaded += 1
+                elif result.path:
+                    # The file exists on disk but conversion failed: record it, skip the manifest.
+                    pipeline.append_log(
+                        criteria.output.conversion_errors_log,
+                        f"{candidate.url} | {result.path} | {result.error_message}",
+                    )
+                    conversion_errors += 1
+                else:
+                    pipeline.append_log(
+                        criteria.output.scrape_log,
+                        f"{candidate.url} | {result.status} | {result.error_message}",
+                    )
+                    failed += 1
+        finally:
+            browser.close()
+
+    _write_filtered_log(Path(criteria.output.filtered_log), filtered)
+    try:
+        tmp_root.rmdir()  # only removes the folder when it is empty
+    except OSError:
+        pass
+
+    print(f"{downloaded} downloaded, {failed} failed, {conversion_errors} conversion_errors")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -111,14 +258,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate_only:
         return 0
 
+    if args.download_one:
+        return _download_one(args.download_one, criteria)
+
     if not args.url:
         print("a product URL is required unless --validate-only is given", file=sys.stderr)
         return 2
 
+    if args.dry_run and args.save:
+        print("--dry-run and --save cannot be combined", file=sys.stderr)
+        return 2
+
+    if args.save:
+        return _save(args.url, criteria, args.criteria, args.limit)
+
     if args.dry_run:
         return _dry_run(args.url, criteria, args.limit)
 
-    print("downloading is not implemented yet; use --dry-run", file=sys.stderr)
+    print("use --dry-run or --save", file=sys.stderr)
     return 2
 
 

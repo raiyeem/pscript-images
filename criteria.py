@@ -8,7 +8,7 @@ instead of being silently ignored.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import (
@@ -37,6 +37,9 @@ class Output(_Strict):
     coverage_report: str
     review_dir: str
     filtered_log: str
+    conversion_errors_log: str
+    image_format: Literal["jpeg", "png", "original"]
+    jpeg_quality: int = Field(ge=1, le=100)
 
 
 class Naming(_Strict):
@@ -117,6 +120,9 @@ class Politeness(_Strict):
     delay_seconds: float = Field(ge=0)
     max_images_per_page: int = Field(ge=1)
     respect_robots: bool
+    user_agent: str = Field(min_length=1)
+    connect_timeout_s: float = Field(gt=0)
+    read_timeout_s: float = Field(gt=0)
 
 
 class Scope(_Strict):
