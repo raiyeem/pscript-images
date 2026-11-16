@@ -157,3 +157,9 @@ politeness:
 scope:
   page_type: product
   one_item_per_page: true
+
+crawl:
+  max_urls_per_category: 100
+  delay_seconds: 1.5
+  same_host_only: true
+  log_path: crawl.log

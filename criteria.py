@@ -136,6 +136,13 @@ class Scope(_Strict):
     one_item_per_page: bool
 
 
+class Crawl(_Strict):
+    max_urls_per_category: int = Field(ge=1)
+    delay_seconds: float = Field(ge=0)
+    same_host_only: bool
+    log_path: str
+
+
 class Criteria(_Strict):
     version: int
     output: Output
@@ -146,6 +153,7 @@ class Criteria(_Strict):
     extraction: Extraction
     politeness: Politeness
     scope: Scope
+    crawl: Crawl
 
     @model_validator(mode="after")
     def _cross_checks(self) -> Criteria:

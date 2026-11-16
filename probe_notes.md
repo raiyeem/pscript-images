@@ -228,6 +228,79 @@ Known limitation: robots.txt `Allow:` directives are not parsed; only `Disallow:
 
 Coverage report scope: `coverage.json`'s top-level `criteria_version` is the version of the run that produced the report — not every manifest row's version. After a `--no-resume` refresh against a different `criteria.yml`, the manifest can hold rows from multiple criteria versions, but the coverage report still describes only the current run. The manifest's per-row `criteria_version` column is the authoritative record of what produced each row's bytes.
 
+## Landing page link survey
+
+Probed `https://foremarket.se/en/` on 2026-11-16 with Playwright. Read-only: no links followed, no downloads, no scraping.
+
+**Anchors:** 43 `<a href>` elements in total.
+
+| Group | Count | Example | Type |
+|---|---|---|---|
+| `/en/explore?category=…` (category filters) | 15 | `/en/explore?category=driver` | category |
+| `/en/login` | 6 | `/en/login` | other |
+| `/en` (home) | 3 | `/en` | other |
+| `/en/explore` | 2 | `/en/explore` | other |
+| `/en/privacy` | 2 | `/en/privacy` | other |
+| `/en/outlet` | 1 | `/en/outlet` | other |
+| Info pages (`about`, `tips`, `contact`, `help`, `buyer-protection`, `returns`, `security`, `terms`, `cookies`) | 9 | `/en/about` | other |
+| External (App Store, Google Play, Facebook, Instagram) | 4 | `https://apps.apple.com/se/app/foremarket/id6475110923` | other |
+| `mailto:` | 1 | `mailto:info@zwitch.se` | other |
+
+The first row's label in the probe output read `/en/explore?query`. That was a labelling error in the probe script; all 15 are `?category=` filters.
+
+**Counts by type:** 0 individual product pages, 15 category pages, 28 other.
+
+**Listing cards are not `<a>` links.** The product cards (for example the Wilsson, TaylorMade, Titleist, and Ping cards, and the Outlet items) are `<div role="link">` elements with no `href` and no `data-href` attribute. There is no `<a>` ancestor. At least 40 such cards exist; the probe output was capped at 40. The product URLs are therefore not in the static DOM. Finding them would need JavaScript execution, such as reading framework state, or clicking each card, which would mean following links the scope rules don't allow. Neither approach is implemented.
+
+## Category page discovery — driver
+
+Probed `https://foremarket.se/en/explore?category=driver` on 2026-11-16 with Playwright. Read-only: no clicks, no links followed, no endpoints called, no downloads.
+
+### 1. Static anchors
+
+- `<a href>` elements: 39 in total. **0** have an href containing `/en/product/`.
+- `<div role="link">` elements (JS-only cards): **12**. All have `onclick` set, `tabindex="0"`, and no `href`.
+
+### 2. Hydration payload
+
+- `#__NEXT_DATA__`: **absent**.
+- `window.__NUXT__`, `window.__INITIAL_STATE__`, `window.__APOLLO_STATE__`, `window.__remixContext`: **all absent**.
+- `page.content()` contains `/en/product/` **48 times**. All 48 sit inside `<script>` tags, not in anchors or cards.
+- Breakdown of those 48 by script:
+  - One `<script type="application/ld+json">` block (`@type: CollectionPage`), where each of the 12 products appears as an `ItemList` entry with a `url` and an `item.offers` URL.
+  - One `text/javascript` block of React Server Components flight data (`self.__next_f.push`), which carries the same product URLs.
+- Product URLs found in the JSON-LD (12 distinct, in list order):
+  - `https://foremarket.se/en/product/d8ae05aa-9572-4448-bb58-917acb2d6929`
+  - `https://foremarket.se/en/product/a8a93777-0520-45c3-bcef-97902029d404`
+  - `https://foremarket.se/en/product/bb58c5b6-1698-471a-888a-c8c4fe4d7c36`
+  - `https://foremarket.se/en/product/62b0ac09-2e6b-4039-a40e-fcfb3b735003`
+  - `https://foremarket.se/en/product/647fad95-3990-4bae-a4dc-3f84063df977`
+- Not verified: whether the card order matches the JSON-LD order, and whether `ItemList` `name` fields are present (they were `None` at item level in this probe).
+
+### 3. Network calls
+
+Resource entries with `initiatorType` `fetch` or `xmlhttprequest`, deduplicated, after the page loaded. Only the page's own requests were read. No endpoint was called.
+
+- Highlighted (contains `explore`, `listing`, `product`, `search`, or `api`):
+  - `https://core.foremarket.se/products/filter` (fetch, status 200). This is an API the page itself called to fill the listing. It is not called by this probe.
+  - `https://foremarket.se/en/explore?_rsc=…` (fetch, status 200). React Server Components navigation prefetch.
+- Other entries (not highlighted): consent configuration, Google Analytics, PostHog, and `/en/login`, `/en/outlet`, `/en` RSC prefetches.
+
+### 4. One card inspection
+
+First `<div role="link">` on the page (truncated to 500 characters):
+
+```
+<div data-slot="card" class="flex flex-col rounded-xl group … cursor-pointer …" role="link" tabindex="0"><div class="relative"><div class="relative w-full overflow-hidden bg-slate-100 aspect-[0.86] sm:aspect-4/5"><img alt="Taylormade sim 2 max driver" loading="lazy" decodi
+```
+
+- Attributes: `data-slot="card"`, `role="link"`, `tabindex="0"`. No `data-*` URL attribute, no `aria-label`, no `href`.
+- `onclick`: set (`onclick` is present as a property; its code was not read).
+- Child text: `StiffTaylormade sim 2 max driverSEK 2,699`. The product name is in the text and the `img` alt.
+- The card does not carry its product URL in the markup. The URL is in the JSON-LD, and the click handler likely resolves to one of those URLs at click time. This was not verified.
+
+**Conclusion: static JSON-LD (`CollectionPage` `ItemList` in the initial HTML) is viable for discovering product URLs from a category page, without clicking cards or calling any API.**
+
 ## Open items
 
 - Probe a product detail page (a URL you give me) to check for `Product` JSON-LD with `brand.name` and `itemCondition`, and to see its image markup.

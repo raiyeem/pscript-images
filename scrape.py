@@ -23,7 +23,7 @@ from pathlib import Path
 from classify import ReviewCollector, classify, first_spec, normalize_brand, normalize_condition
 from criteria import Criteria, CriteriaError, load_criteria
 from extract import Filtered
-from politeness import blocking_rule, effective_delay, fetch_robots, parse_robots
+from politeness import check_robots
 
 _DOWNLOAD_TEST_STEM = Path(__file__).resolve().parent / "_download_test"
 _KNOWN_MAGIC = {
@@ -111,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-resume",
         action="store_true",
         help="with --save: download every candidate, even if its source_url is already in the manifest",
+    )
+    parser.add_argument(
+        "--crawl",
+        metavar="CATEGORY_URL",
+        default=None,
+        help="list the product URLs on a category page. Discovery only: no downloads, no manifest changes.",
     )
     return parser
 
@@ -361,24 +367,23 @@ def _save(
     return 0
 
 
-def _robots_gate(criteria: Criteria, url: str) -> tuple[bool, float]:
-    """(allowed, delay). Blocks only on an explicit Disallow for our UA; a missing robots.txt proceeds."""
-    politeness = criteria.politeness
-    text, note = fetch_robots(url, politeness.user_agent, politeness.connect_timeout_s)
-    if text is None:
-        print(f"warning: {note}", file=sys.stderr)
-        return (True, effective_delay(criteria, None))
-    policy = parse_robots(text, politeness.ua_name)
-    rule = blocking_rule(policy, url)
-    if rule is not None:
-        path = urlsplit(url).path or "/"
-        print(
-            f"warning: robots.txt disallows {politeness.ua_name} from {path} "
-            f"(rule: Disallow: {rule}). Nothing downloaded.",
-            file=sys.stderr,
-        )
-        return (False, 0.0)
-    return (True, effective_delay(criteria, policy.crawl_delay))
+def _crawl(category_url: str, criteria: Criteria) -> int:
+    from discover import discover_product_urls
+
+    if criteria.politeness.respect_robots:
+        allowed, _ = check_robots(category_url, criteria)
+        if not allowed:
+            return 1  # blocked before discovery, so crawl.log is not written
+
+    try:
+        urls = discover_product_urls(category_url, criteria)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for url in urls:
+        print(url)
+    print(f"{len(urls)} URLs discovered from {category_url}")
+    return 0
 
 
 def _propose(criteria: Criteria) -> int:
@@ -425,6 +430,9 @@ def main(argv: list[str] | None = None) -> int:
         print("--rename-files only applies together with --renormalize", file=sys.stderr)
         return 2
 
+    if args.crawl:
+        return _crawl(args.crawl, criteria)
+
     if args.propose_criteria:
         return _propose(criteria)
 
@@ -449,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.save:
         delay = criteria.politeness.delay_seconds
         if criteria.politeness.respect_robots:
-            allowed, delay = _robots_gate(criteria, args.url)
+            allowed, delay = check_robots(args.url, criteria)
             if not allowed:
                 return 1  # checked before --reset, so a blocked run deletes nothing
         if args.reset:

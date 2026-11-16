@@ -10,6 +10,7 @@ Only the page URL's host is checked. Image CDN hosts are not checked.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
@@ -86,3 +87,27 @@ def blocking_rule(policy: RobotsPolicy, url: str) -> str | None:
 def effective_delay(criteria: Criteria, crawl_delay: float | None) -> float:
     """Larger of politeness.delay_seconds and the robots Crawl-delay."""
     return max(criteria.politeness.delay_seconds, crawl_delay or 0.0)
+
+
+def check_robots(url: str, criteria: Criteria) -> tuple[bool, float]:
+    """(allowed, delay) for a URL's host. Blocks only on an explicit Disallow for our UA.
+
+    A missing or unreachable robots.txt proceeds with a warning. Prints a warning naming
+    the rule and path when blocked.
+    """
+    politeness = criteria.politeness
+    text, note = fetch_robots(url, politeness.user_agent, politeness.connect_timeout_s)
+    if text is None:
+        print(f"warning: {note}", file=sys.stderr)
+        return (True, effective_delay(criteria, None))
+    policy = parse_robots(text, politeness.ua_name)
+    rule = blocking_rule(policy, url)
+    if rule is not None:
+        path = urlsplit(url).path or "/"
+        print(
+            f"warning: robots.txt disallows {politeness.ua_name} from {path} "
+            f"(rule: Disallow: {rule}). Nothing downloaded.",
+            file=sys.stderr,
+        )
+        return (False, 0.0)
+    return (True, effective_delay(criteria, policy.crawl_delay))
