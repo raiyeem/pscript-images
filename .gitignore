@@ -21,3 +21,6 @@ coverage.json
 # Tooling
 node_modules/
 .playwright-mcp/
+
+# Overnight run logs
+overnight_*.log
